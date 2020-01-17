@@ -7,7 +7,7 @@ import * as Constants from '../../constants/settings'
 import {anyErrors, anyWaiting} from '../../constants/waiting'
 import Advanced from '.'
 import * as Container from '../../util/container'
-import {isLinux} from '../../constants/platform'
+import {isLinux, isWindows} from '../../constants/platform'
 
 type OwnProps = {}
 
@@ -31,7 +31,7 @@ export default Container.connect(
   dispatch => ({
     _loadHasRandomPW: () => dispatch(SettingsGen.createLoadHasRandomPw()),
     _loadLockdownMode: () => dispatch(SettingsGen.createLoadLockdownMode()),
-    _loadNixOnLoginStartup: () => isLinux && dispatch(ConfigGen.createLoadNixOnLoginStartup()),
+    _loadOnLoginStartup: () => (isLinux || isWindows) && dispatch(ConfigGen.createLoadOnLoginStartup()),
     _loadRememberPassword: () => dispatch(SettingsGen.createLoadRememberPassword()),
     onBack: () => dispatch(RouteTreeGen.createNavigateUp()),
     onChangeLockdownMode: (enabled: boolean) => dispatch(SettingsGen.createOnChangeLockdownMode({enabled})),
@@ -51,7 +51,7 @@ export default Container.connect(
     onTrace: (durationSeconds: number) => dispatch(SettingsGen.createTrace({durationSeconds})),
   }),
   (s, d, o: OwnProps) => {
-    const {_loadHasRandomPW, _loadLockdownMode, _loadNixOnLoginStartup, _loadRememberPassword, ...restD} = d
+    const {_loadHasRandomPW, _loadLockdownMode, _loadOnLoginStartup, _loadRememberPassword, ...restD} = d
 
     return {
       ...o,
@@ -61,7 +61,7 @@ export default Container.connect(
         _loadLockdownMode()
         _loadHasRandomPW()
         _loadRememberPassword()
-        _loadNixOnLoginStartup()
+        _loadOnLoginStartup()
       },
     }
   }
