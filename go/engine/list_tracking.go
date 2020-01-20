@@ -5,7 +5,6 @@ package engine
 
 import (
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/keybase/client/go/libkb"
@@ -28,15 +27,21 @@ func (tl TrackList) Less(i, j int) bool {
 }
 
 type ListTrackingEngineArg struct {
-	JSON         bool
-	Verbose      bool
-	Filter       string
-	ForAssertion string
+	Assertion  string
+	UID        keybase1.UID
+	CachedOnly bool
+
+	JSON    bool
+	Verbose bool
+	Filter  string
 }
 
+// ListTrackingEngine loads the follows of the given user using their sigchain,
+// but relies on the server to filter out users who have reset after the follow
+// statement.
 type ListTrackingEngine struct {
 	arg         *ListTrackingEngineArg
-	tableResult []keybase1.UserSummary
+	tableResult keybase1.UserSummarySet
 	jsonResult  string
 	libkb.Contextified
 }
@@ -59,37 +64,83 @@ func (e *ListTrackingEngine) RequiredUIs() []libkb.UIKind { return []libkb.UIKin
 func (e *ListTrackingEngine) SubConsumers() []libkb.UIConsumer { return nil }
 
 func (e *ListTrackingEngine) Run(m libkb.MetaContext) (err error) {
-
-	arg := libkb.NewLoadUserArgWithMetaContext(m).WithStubMode(libkb.StubModeUnstubbed)
-
-	if len(e.arg.ForAssertion) > 0 {
-		arg = arg.WithName(e.arg.ForAssertion)
-	} else {
-		arg = arg.WithSelf(true)
+	uid, err := lookupUID(m, e.arg.UID, e.arg.Assertion, e.arg.CachedOnly)
+	if err != nil {
+		return err
 	}
 
-	err = m.G().GetFullSelfer().WithUser(arg, func(user *libkb.User) error {
-		if user == nil {
-			return libkb.UserNotFoundError{}
+	// Get version according to server so we can filter out reset users later
+	ts := libkb.NewServertrustTrackerSyncer(m.G(), m.G().GetMyUID(), libkb.FollowDirectionFollowing)
+	var tsErr error
+	if e.arg.CachedOnly {
+		tsErr = libkb.RunSyncerCached(m, ts, uid)
+	} else {
+		tsErr = libkb.RunSyncer(m, ts, uid, false /* loggedIn */, false /* forceReload */)
+	}
+	useServerLookup := false
+	serverLookup := make(map[keybase1.UID]struct{})
+	if tsErr != nil {
+		m.Warning("failed to load following list from server (cachedOnly=%t); continuing: %s", e.arg.CachedOnly, tsErr)
+	} else {
+		useServerLookup = true
+		m.Debug("got following list from server (len=%d, cachedOnly=%t); using it to filter sigchain list", len(ts.Result().Users), e.arg.CachedOnly)
+		for _, user := range ts.Result().Users {
+			serverLookup[user.Uid] = struct{}{}
 		}
+	}
 
-		var trackList TrackList
-		var err error
-		if idTable := user.IDTable(); idTable != nil {
-			trackList = idTable.GetTrackList()
-		}
+	// Load unstubbed so we get track links
+	larg := libkb.NewLoadUserArgWithMetaContext(m).
+		WithUID(uid).
+		WithStubMode(libkb.StubModeUnstubbed).
+		WithCachedOnly(e.arg.CachedOnly).
+		WithStaleOK(e.arg.CachedOnly).
+		WithSelf(uid.Exists() && uid.Equal(m.G().GetMyUID()))
+	upak, _, err := m.G().GetUPAKLoader().LoadV2(larg)
+	if err != nil {
+		return err
+	}
+	unfilteredTracks := upak.Current.RemoteTracks
 
-		trackList, err = filterRxx(trackList, e.arg.Filter)
-		if err != nil {
-			return err
+	// Filter out any marked reset by server
+	var filteredTracks []keybase1.RemoteTrack
+	for _, track := range unfilteredTracks {
+		trackedUID := track.Uid
+		if useServerLookup {
+			if _, ok := serverLookup[trackedUID]; !ok {
+				m.Debug("filtering out uid %s in sigchain list but not provided by server")
+				continue
+			}
 		}
-		sort.Sort(trackList)
+		filteredTracks = append(filteredTracks, track)
+	}
 
-		if e.arg.JSON {
-			return e.runJSON(m, trackList, e.arg.Verbose)
-		}
-		return e.runTable(m, trackList)
-	})
+	var ret keybase1.UserSummarySet
+	for _, track := range filteredTracks {
+		ret.Users = append(ret.Users, keybase1.UserSummary{
+			Uid:      track.Uid,
+			Username: track.Username,
+		})
+	}
+	e.tableResult = ret
+	// SORT IT
+
+	// err = m.G().GetFullSelfer().WithUser(arg, func(user *libkb.User) error {
+	// 	if user == nil {
+	// 		return libkb.UserNotFoundError{}
+	// 	}
+
+	// 	trackList, err = filterRxx(trackList, e.arg.Filter)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	sort.Sort(trackList)
+
+	// 	if e.arg.JSON {
+	// 		return e.runJSON(m, trackList, e.arg.Verbose)
+	// 	}
+	// 	return e.runTable(m, trackList)
+	// })
 
 	return err
 }
@@ -175,21 +226,24 @@ func (e *ListTrackingEngine) linkWebProofs(link *libkb.TrackChainLink) (res []ke
 }
 
 func (e *ListTrackingEngine) runTable(m libkb.MetaContext, trackList TrackList) error {
+	e.tableResult = keybase1.UserSummarySet{}
 	for _, link := range trackList {
 		uid, err := link.GetTrackedUID()
 		if err != nil {
 			return err
 		}
 		entry := keybase1.UserSummary{
-			Username:     link.ToDisplayString(),
-			SigIDDisplay: link.GetSigID().ToDisplayString(true),
-			TrackTime:    keybase1.ToTime(link.GetCTime()),
-			Uid:          uid,
+			Uid:      uid,
+			Username: link.ToDisplayString(),
+			Extra: &keybase1.UserSummaryExtra{
+				SigIDDisplay: link.GetSigID().ToDisplayString(true),
+				TrackTime:    keybase1.ToTime(link.GetCTime()),
+			},
 		}
-		entry.Proofs.PublicKeys = e.linkPGPKeys(m, link)
-		entry.Proofs.Social = e.linkSocialProofs(link)
-		entry.Proofs.Web = e.linkWebProofs(link)
-		e.tableResult = append(e.tableResult, entry)
+		entry.Extra.Proofs.PublicKeys = e.linkPGPKeys(m, link)
+		entry.Extra.Proofs.Social = e.linkSocialProofs(link)
+		entry.Extra.Proofs.Web = e.linkWebProofs(link)
+		e.tableResult.Users = append(e.tableResult.Users, entry)
 	}
 	return nil
 }
@@ -267,7 +321,7 @@ func condenseRecord(l *libkb.TrackChainLink) (*jsonw.Wrapper, error) {
 	return out, nil
 }
 
-func (e *ListTrackingEngine) TableResult() []keybase1.UserSummary {
+func (e *ListTrackingEngine) TableResult() keybase1.UserSummarySet {
 	return e.tableResult
 }
 

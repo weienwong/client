@@ -53,13 +53,13 @@ func proofSetFromUserSummary(summary keybase1.UserSummary) *libkb.ProofSet {
 		{Key: "keybase", Value: summary.Username},
 		{Key: "uid", Value: summary.Uid.String()},
 	}
-	for _, socialProof := range summary.Proofs.Social {
+	for _, socialProof := range summary.Extra.Proofs.Social {
 		proofs = append(proofs, libkb.Proof{
 			Key:   socialProof.ProofType,
 			Value: socialProof.ProofName,
 		})
 	}
-	for _, webProof := range summary.Proofs.Web {
+	for _, webProof := range summary.Extra.Proofs.Web {
 		for _, protocol := range webProof.Protocols {
 			proofs = append(proofs, libkb.Proof{
 				Key:   protocol,
@@ -75,7 +75,7 @@ func (e *PGPPullEngine) getTrackedUserSummaries(m libkb.MetaContext) ([]keybase1
 	if err != nil {
 		return nil, nil, err
 	}
-	allTrackedSummaries := e.listTrackingEngine.TableResult()
+	allTrackedSummaries := e.listTrackingEngine.TableResult().Users
 
 	// Without any userAsserts specified, just all summaries and no leftovers.
 	if e.userAsserts == nil || len(e.userAsserts) == 0 {
@@ -214,7 +214,7 @@ func (e *PGPPullEngine) runLoggedIn(m libkb.MetaContext) error {
 		// Compute the set of tracked pgp fingerprints. LoadUser will fetch key
 		// data from the server, and we will compare it against this.
 		trackedFingerprints := make(map[string]bool)
-		for _, pubKey := range userSummary.Proofs.PublicKeys {
+		for _, pubKey := range userSummary.Extra.Proofs.PublicKeys {
 			if pubKey.PGPFingerprint != "" {
 				trackedFingerprints[pubKey.PGPFingerprint] = true
 			}
