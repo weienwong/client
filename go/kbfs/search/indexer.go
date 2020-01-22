@@ -412,6 +412,15 @@ func (i *Indexer) indexChildWithPtrAndNode(
 	if i.blocksDb == nil {
 		return false, errors.New("No indexed blocks db")
 	}
+
+	// TODO(HOTPOT-1763): If the ptr already exists in the index, we
+	// should skip indexing it again.  (Maybe have directories write a
+	// special updates when all of its children have been indexed, to
+	// avoid going down those path?) This means we have to change the
+	// assumptions here for what IDs are already in the db when a
+	// child is being updated -- probably an old and a new pointer
+	// will be required. (Old can be empty if it's supposed to be a
+	// new child.)
 	ver, docID, err := i.blocksDb.Get(ctx, ptr)
 	switch errors.Cause(err) {
 	case nil:
