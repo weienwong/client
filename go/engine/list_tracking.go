@@ -124,6 +124,7 @@ func (e *ListTrackingEngine) Run(m libkb.MetaContext) (err error) {
 	}
 	e.tableResult = ret
 	// SORT IT
+	// FILTER IT
 
 	// err = m.G().GetFullSelfer().WithUser(arg, func(user *libkb.User) error {
 	// 	if user == nil {
