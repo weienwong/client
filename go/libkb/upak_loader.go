@@ -21,7 +21,6 @@ type UPAKLoader interface {
 	ClearMemory()
 	Load(arg LoadUserArg) (ret *keybase1.UserPlusAllKeys, user *User, err error)
 	LoadV2(arg LoadUserArg) (ret *keybase1.UserPlusKeysV2AllIncarnations, user *User, err error)
-	LoadV2CachedOnly(mctx MetaContext, uid keybase1.UID, stubMode StubMode, staleOK bool, accessor func(k *keybase1.UserPlusKeysV2AllIncarnations) error) error
 	LoadLite(arg LoadUserArg) (ret *keybase1.UPKLiteV1AllIncarnations, err error)
 	CheckKIDForUID(ctx context.Context, uid keybase1.UID, kid keybase1.KID) (found bool, revokedAt *keybase1.KeybaseTime, deleted bool, err error)
 	LoadUserPlusKeys(ctx context.Context, uid keybase1.UID, pollForKID keybase1.KID) (keybase1.UserPlusKeys, error)
@@ -344,17 +343,6 @@ func (u *CachedUPAKLoader) LoadLite(arg LoadUserArg) (*keybase1.UPKLiteV1AllInca
 
 	upakLite, err := LoadUPAKLite(arg)
 	return upakLite, err
-}
-
-func (u *CachedUPAKLoader) LoadV2CachedOnly(mctx MetaContext, uid keybase1.UID, stubMode StubMode, staleOK bool, accessor func(k *keybase1.UserPlusKeysV2AllIncarnations) error) (err error) {
-	upak, fresh := u.getCachedUPAK(mctx.Ctx(), uid, stubMode, nil)
-	if upak == nil {
-		return UserNotFoundError{UID: uid, Msg: "no cached user found"}
-	}
-	if !fresh && !staleOK {
-		return UserNotFoundError{UID: uid, Msg: "cached user found, but it was stale, and cached only"}
-	}
-	return accessor(upak)
 }
 
 // loadWithInfo loads a user from the CachedUPAKLoader object. The 'info'
