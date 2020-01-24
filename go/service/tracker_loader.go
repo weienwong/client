@@ -112,6 +112,7 @@ func (l *TrackerLoader) loadInner(mctx libkb.MetaContext, uid keybase1.UID, with
 	}
 	followers := eng2.GetResults()
 
+	l.debug(mctx.Ctx(), "loadInner: loaded %d followers, %d following", len(followers.Users), len(following.Users))
 	l.G().NotifyRouter.HandleTrackingInfo(keybase1.TrackingInfoArg{
 		Uid:       uid,
 		Followees: following.Usernames(),
